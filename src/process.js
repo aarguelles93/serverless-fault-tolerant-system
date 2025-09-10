@@ -29,7 +29,7 @@ exports.handler = async (event) => {
 
   const { taskId, payload } = parsed;
 
-  // Update status => processing
+  // update status to processing
   try {
     await ddb.send(new UpdateCommand({
       TableName: process.env.TASKS_TABLE,
@@ -40,7 +40,7 @@ exports.handler = async (event) => {
     }));
   } catch (e) {
     console.error("Failed to update DynamoDB to processing", { taskId, error: e.message });
-    // Continue processing even if status update failed
+    // not critical, continue processing
   }
 
   try {
@@ -51,7 +51,7 @@ exports.handler = async (event) => {
 
     console.log("Processed OK", { taskId, attempt, payload });
 
-    // Update status => success
+    // update status to success
     try {
       await ddb.send(new UpdateCommand({
         TableName: process.env.TASKS_TABLE,
@@ -69,7 +69,7 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error(`Processing failed (attempt ${attempt})`, { taskId, error: err.message });
 
-    // Update status => failed
+    // update status to failed
     try {
       await ddb.send(new UpdateCommand({
         TableName: process.env.TASKS_TABLE,
