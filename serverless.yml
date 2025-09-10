@@ -1,0 +1,56 @@
+service: serverless-assesment
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  region: ${opt:region, env:AWS_REGION, env:AWS_DEFAULT_REGION, 'eu-north-1'}
+  stage: ${opt:stage, 'dev'}
+  runtime: nodejs18.x
+  profile: ${env:AWS_PROFILE, 'serverless-assignment'}
+  memorySize: 256
+  timeout: 15
+  environment:
+    TASKS_QUEUE_URL: { Ref: TasksQueue }
+    DLQ_URL: { Ref: TasksDLQ }
+  deploymentBucket:
+    name: serverless-deploy-173003411649-eu-north-1
+    blockPublicAccess: true
+    serverSideEncryption: AES256
+
+functions:
+  submitTask:
+    handler: src/submit.handler
+    description: "HTTP API endpoint to submit tasks to SQS"
+    events:
+      - httpApi:
+          path: /tasks
+          method: post
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - sqs:SendMessage
+        Resource:
+          - Fn::GetAtt: [TasksQueue, Arn]
+
+resources:
+  Resources:
+    TasksQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-tasks
+        VisibilityTimeout: 30 # must be >= than function timeout
+        RedrivePolicy:
+          deadLetterTargetArn: { 'Fn::GetAtt': [TasksDLQ, Arn] }
+          maxReceiveCount: 2  # max 2 processing attempts, then DLQ
+    TasksDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-dlq
+        MessageRetentionPeriod: 1209600  # 14 days
+
+  Outputs:
+    ApiUrl:
+      Value: https://${self:service}-${self:provider.stage}.execute-api.${self:provider.region}.amazonaws.com
+      Description: "HTTP API base"
+    TasksQueueUrl:
+      Value: { Ref: TasksQueue }

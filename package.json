@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "sls:package": "serverless package --region $AWS_REGION --aws-profile $AWS_PROFILE",
+    "sls:deploy": "serverless deploy --region $AWS_REGION --aws-profile $AWS_PROFILE",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -10,5 +14,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.883.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "eslint": "^8.57.1",
+    "globals": "^16.4.0"
   }
 }
