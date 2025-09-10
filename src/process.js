@@ -1,5 +1,9 @@
 const { SQSClient, ChangeMessageVisibilityCommand } = require("@aws-sdk/client-sqs");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const STATUS = require("./constants/statuses");
 const sqs = new SQSClient({});
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 function shouldFail() {
   // 30% failure
@@ -15,21 +19,68 @@ exports.handler = async (event) => {
   const attempt = Number(attributes?.ApproximateReceiveCount || "1");
   const maxRetries = Number(process.env.MAX_RETRIES || "2");
 
+  let parsed;
   try {
-    const parsed = JSON.parse(body);
-    const { taskId, payload } = parsed;
+    parsed = JSON.parse(body);
+  } catch (e) {
+    console.error("Failed to parse message body", e);
+    throw e;
+  }
 
+  const { taskId, payload } = parsed;
+
+  // update status to processing
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: process.env.TASKS_TABLE,
+      Key: { taskId },
+      UpdateExpression: "SET #s = :s, lastAttemptAt = :t, attempts = if_not_exists(attempts, :zero) + :inc",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":s": STATUS.PROCESSING, ":t": new Date().toISOString(), ":inc": 1, ":zero": 0 }
+    }));
+  } catch (e) {
+    console.error("Failed to update DynamoDB to processing", { taskId, error: e.message });
+    // not critical, continue processing
+  }
+
+  try {
     // Simulate processing with random failure
     if (shouldFail()) {
       throw new Error("Simulated processing failure");
     }
 
     console.log("Processed OK", { taskId, attempt, payload });
+
+    // update status to success
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName: process.env.TASKS_TABLE,
+        Key: { taskId },
+        UpdateExpression: "SET #s = :s, completedAt = :t",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":s": STATUS.SUCCESS, ":t": new Date().toISOString() }
+      }));
+    } catch (e) {
+      console.error("Failed to update DynamoDB to success", { taskId, error: e.message });
+    }
+
     //Lambda auto deletes the message from SQS
     return { batchItemFailures: [] };
   } catch (err) {
-    const { taskId } = parsed || {};
     console.error(`Processing failed (attempt ${attempt})`, { taskId, error: err.message });
+
+    // update status to failed
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName: process.env.TASKS_TABLE,
+        Key: { taskId },
+        UpdateExpression: "SET #s = :s, lastError = :err, lastAttemptAt = :t",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":s": STATUS.FAILED, ":err": err.message, ":t": new Date().toISOString() }
+      }));
+    } catch (e) {
+      console.error("Failed to update DynamoDB on failure", { taskId, error: e.message });
+    }
 
     // Exponential backoff only if we have retries left
     if (attempt < maxRetries) {

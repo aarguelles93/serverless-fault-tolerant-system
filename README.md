@@ -3,16 +3,17 @@
 ## Overview
 
 This project is a fault-tolerant and event driven backend system built on AWS, designed to reliably process tasks that includes failure handling and retry logic.  
-It implements async task submission, processing, retry with exponential backoff, and dead-letter queue monitoring.
+It implements async task submission, processing, retry with exponential backoff, dead-letter queue monitoring, and a DynamoDB table to track task status.
 
 ## Solution Architecture And Services Used
 
 - **API Gateway**: Receives HTTP POST requests to submit new tasks.
-- **submitTask Lambda**: Validates and sends tasks to an SQS queue.
+- **submitTask Lambda**: Validates and sends tasks to an SQS queue and writes an initial record to DynamoDB (status: pending).
 - **SQS Task Queue**: Buffers tasks for asynchronous processing.
-- **processTask Lambda**: Consumes tasks, simulates random failures (30%), applies exponential backoff retry logic, and allows unprocessable tasks to flow to the DLQ.
+- **processTask Lambda**: Consumes tasks, simulates random failures (30%), applies exponential backoff retry logic, and updates task status in DynamoDB.
+- **DynamoDB Tasks Table**: Stores task records and lifecycle status (pending, processing, success, failed, dead-letter).
 - **DLQ (Dead-Letter Queue)**: Stores tasks that failed after max retries.
-- **dlqMonitor Lambda**: Logs failed tasks from the DLQ to CloudWatch for monitoring.
+- **dlqMonitor Lambda**: Marks DLQ items in DynamoDB and logs failed tasks to CloudWatch.
 - **AWS CloudWatch**: Monitoring of the processes logs.
 
 ## Parameters & Environment
@@ -20,6 +21,7 @@ It implements async task submission, processing, retry with exponential backoff,
 - **TASKS_QUEUE_URL**: SQS Task Queue URL
 - **DLQ_URL**: SQS DLQ Queue URL
 - **MAX_RETRIES**: No. of max retries before moving message to DLQ (default: 2)
+- **TASKS_TABLE**: DynamoDB table name used to store task records
 
 ## Deployment
 
@@ -46,7 +48,7 @@ It implements async task submission, processing, retry with exponential backoff,
 - **Behavior:**
   - Each task has a 30% chance to fail processing (simulated).
   - Failed tasks are retried with exponential backoff (10s, then 20s).
-  - After `MAX_RETRIES`, tasks are moved to the DLQ.
+  - After `MAX_RETRIES`, tasks are moved to the DLQ and marked in DynamoDB.
   - DLQ tasks are logged to CloudWatch by the `dlqMonitor` Lambda.
 
 ## Assumptions
