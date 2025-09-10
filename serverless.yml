@@ -12,6 +12,7 @@ provider:
   environment:
     TASKS_QUEUE_URL: { Ref: TasksQueue }
     DLQ_URL: { Ref: TasksDLQ }
+    MAX_RETRIES: '2'
   deploymentBucket:
     name: serverless-deploy-173003411649-eu-north-1
     blockPublicAccess: true
@@ -31,6 +32,39 @@ functions:
           - sqs:SendMessage
         Resource:
           - Fn::GetAtt: [TasksQueue, Arn]
+
+  processTask:
+    handler: src/process.handler
+    description: "Processes tasks from SQS. Includes exponential backoff and DLQ redrive"
+    events:
+      - sqs:
+          arn: { 'Fn::GetAtt': [TasksQueue, Arn] }
+          batchSize: 1
+          functionResponseType: ReportBatchItemFailures
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - sqs:ChangeMessageVisibility
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [TasksQueue, Arn]
+
+  dlqMonitor:
+    handler: src/dlqMonitor.handler
+    description: "Logs failed tasks to CloudWatch. Triggered by DLQ"
+    events:
+      - sqs:
+          arn: { 'Fn::GetAtt': [TasksDLQ, Arn] }
+          batchSize: 1
+          functionResponseType: ReportBatchItemFailures
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - sqs:ReceiveMessage
+          - sqs:DeleteMessage
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [TasksDLQ, Arn]
 
 resources:
   Resources:
